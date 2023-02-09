@@ -7,7 +7,7 @@ from timeit import default_timer as t
 from tqdm import tqdm
 from pytorch_beam_search import seq2seq
 import torch
-from pytorch_decoding import seq2seq
+
 ######################
 # weighting functions
 ######################
