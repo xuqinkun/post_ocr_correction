@@ -13,7 +13,7 @@ folder = "../../data/ICDAR2019_POCR_competition_dataset/ICDAR2019_POCR_competiti
 
 output_folder = Path("../../data/en")
 files = sorted(os.listdir(folder))
-len(files)
+print("len files: %d" % len(files))
 
 import glob
 
@@ -37,6 +37,7 @@ def create_windows(x):
 
 p = Pool(4)
 
+print("Data processing")
 data = list(p.imap_unordered(extract, tqdm(files), chunksize=128))
 len(data)
 
@@ -54,6 +55,7 @@ data = pd.DataFrame(data,
         gs_aligned = lambda df: df.gs_aligned.str.replace("[ GS_aligned] ", "", regex = False))
 
 print(data.shape)
+print("Head:")
 data.head()
 
 data.applymap(len).describe()
@@ -74,11 +76,11 @@ with open(data_dir/"vocabulary.pkl", "wb") as file:
 
 dev = data.sample(n = 5, random_state = 1)
 dev.to_pickle(output_folder/"data/dev.pkl")
-dev.shape
+print("dev.shape:", dev.shape)
 
 train = data.drop(dev.index)
 train.to_pickle(output_folder/"data/train.pkl")
-train.shape
+print("train.shape:", train.shape)
 
 train.applymap(len).describe()
 dev.applymap(len).describe()
@@ -109,9 +111,11 @@ dev_aligned = dev.apply(lambda r: create_windows((r["ocr_aligned"], r["gs_aligne
                             axis = 1).sum()
 dev_aligned = pd.DataFrame(dev_aligned, columns = ["source", "target"])
 print(dev_aligned.shape)
-dev_aligned.head()
+print(dev_aligned.head())
 
 dev_aligned = dev_aligned.assign(source = lambda df: df.source.str.replace("@", ""))
-dev_aligned.head()
+print(dev_aligned.head())
 train_aligned.to_pickle(output_folder/"data/train_aligned.pkl")
 dev_aligned.to_pickle(output_folder/"data/dev_aligned.pkl")
+print('Finish')
+sys.exit(0)

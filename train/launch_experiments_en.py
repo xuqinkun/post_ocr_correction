@@ -11,12 +11,15 @@ from random import randint as r
 from random import choice
 import sys
 import pandas as pd
-sys.path.append("/home/jarobyte/guemes/lib/")
-from pytorch_decoding.seq2seq import Transformer
-# from metrics import levenshtein
+# sys.path.append("/home/jarobyte/guemes/lib/")
+sys.path.append("../lib/post_ocr_correction")
+
+from pytorch_beam_search.seq2seq import Transformer
+from metrics import levenshtein
 from timeit import default_timer as t
-from ocr_correction import evaluate_model
-    
+# from ocr_correction import evaluate_model
+from post_ocr_correction.correction import full_evaluation
+
 parser = argparse.ArgumentParser(description = "Launch experiments")
 parser.add_argument("--experiment_id", type = str)
 parser.add_argument('--full', action = "store_true")
@@ -32,7 +35,7 @@ args = parser.parse_args()
 experiment_id = args.experiment_id
 
 # fit parameters
-    
+
 learning_rate = 10**-4
 batch_size = 100
 
@@ -44,7 +47,7 @@ else:
     epochs = 10
     train_size = 1000
     dev_size = 100
-    
+
 
 # model hyperparameters
 
@@ -62,10 +65,10 @@ else:
     attention_heads = 8
     embedding_dimension = 512
     feedforward_dimension = 2048
-    dropout = 0.1 
+    dropout = 0.1
 
 # loading data
-    
+
 input_vocabulary = pickle.load(open(main_folder + "data/char2i.pkl", "rb"))
 train_source = torch.load(main_folder + "data/train_source.pt")[:train_size].to(device)
 dev_source = torch.load(main_folder + "data/dev_source.pt")[:dev_size].to(device)
@@ -73,11 +76,11 @@ dev_source = torch.load(main_folder + "data/dev_source.pt")[:dev_size].to(device
 output_vocabulary = pickle.load(open(main_folder + "data/i2char.pkl", "rb"))
 train_target = torch.load(main_folder + "data/train_target.pt")[:train_size].to(device)
 dev_target = torch.load(main_folder + "data/dev_target.pt")[:dev_size].to(device)
-    
+
 # creating the model
-    
-net = Transformer(in_vocabulary = input_vocabulary, 
-                  out_vocabulary = output_vocabulary, 
+
+net = Transformer(in_vocabulary = input_vocabulary,
+                  out_vocabulary = output_vocabulary,
                   embedding_dimension = embedding_dimension,
                   encoder_layers = encoder_layers,
                   decoder_layers = decoder_layers,
@@ -96,16 +99,16 @@ performance = net.fit(X_train = train_source,
                       Y_dev = dev_target,
                       epochs = epochs,
                       batch_size = batch_size,
-                      learning_rate = learning_rate, 
-                      weight_decay = weight_decay, 
-                      progress_bar = 0, 
+                      learning_rate = learning_rate,
+                      weight_decay = weight_decay,
+                      progress_bar = 0,
                       save_path = f"{main_folder}{output_folder}/checkpoints/{experiment_id}.pt")
 
 
 # saving the log and the model architecture
 
 performance\
-.assign(encoder_tokens = len(input_vocabulary), 
+.assign(encoder_tokens = len(input_vocabulary),
         decoder_tokens = len(output_vocabulary),
         experiment_id = experiment_id)\
 .to_csv(f"{main_folder}{output_folder}/experiments/{experiment_id}.csv", index = False)
@@ -123,7 +126,7 @@ if args.full:
     window_size = 50
 else:
     window_size = 5
-evaluation = evaluate_model(raw = dev.ocr_to_input,
+evaluation = full_evaluation(raw = dev.ocr_to_input,
                             gs = dev.gs_aligned,
                             model = net,
                             vocabulary = vocabulary,
