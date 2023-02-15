@@ -1,13 +1,10 @@
 # -*- coding: utf-8 -*-
-import json
-import re
-import os
-import sys
 import argparse
 import json
-import glob
+import re
+import sys
+
 import torch
-import pickle
 
 sys.path.append("../lib/post_ocr_correction")
 from tqdm import tqdm
@@ -47,7 +44,8 @@ def load_data(docs):
         X = torch.load(source_save_file)
         Y = torch.load(target_save_file)
         return source_index, target_index, X, Y
-    train_data = list(p.imap_unordered(create_windows, tqdm(zip(docs, [window_length for i in docs])), chunksize=128))
+    train_data = list(
+        pool.imap_unordered(create_windows, tqdm(zip(docs, [window_size for i in docs])), chunksize=128))
     train_data = [d for doc in train_data for d in doc]
     # train data and model
     source = ["".join(t[0]).replace(GAP, '') for t in train_data]
@@ -65,14 +63,17 @@ def load_data(docs):
 
 
 if __name__ == '__main__':
-    p = Pool(4)
+    pool = Pool(4)
     parser = argparse.ArgumentParser()
     parser.add_argument('-m', '--model_path', type=str)
     parser.add_argument('-i', '--input_path', type=str)
     parser.add_argument('-o', '--output_path', type=str)
+    parser.add_argument('-w', '--window_size', type=int)
+    parser.add_argument('--do_train', action="store_true")
+    parser.add_argument('--do_eval', action="store_true")
+    parser.add_argument('--do_prediction', action="store_true")
     args = parser.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     folder = Path(args.input_path)
     model_path = Path(args.model_path)
     output_folder = Path(args.output_path)
@@ -83,62 +84,90 @@ if __name__ == '__main__':
     test_align_document = train_dir / 'align'
     train_files = train_align_document.glob('*.txt')
     test_files = test_align_document.glob('*.txt')
+    model_checkpoint = model_path / 'model.pt'
 
-    window_length = 100
-    train_docs = list(p.imap_unordered(extract, tqdm(train_files), chunksize=128))
-    test_docs = list(p.imap_unordered(extract, tqdm(test_files), chunksize=128))
-    source_index, target_index, X, Y = load_data(train_docs)
-
-    model = seq2seq.Transformer(source_index,
-                                target_index,
-                                max_sequence_length=X.shape[1]
-                                )
+    window_size = args.window_size
+    train_docs = list(pool.imap_unordered(extract, tqdm(train_files), chunksize=128))
+    train_source_index, train_target_index, train_X, train_Y = load_data(train_docs)
+    test_docs = list(pool.imap_unordered(extract, tqdm(test_files), chunksize=128))
+    # load model
+    if model_checkpoint.exists():
+        model = torch.load(model_checkpoint)
+    else:
+        model = seq2seq.Transformer(train_source_index,
+                                    train_target_index,
+                                    max_sequence_length=train_X.shape[1]
+                                    )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device=device)
-    model.train()
-    X = X.to(device)
-    Y = Y.to(device)
-    model.fit(X_train=X, Y_train=Y, epochs=100, progress_bar=1)
-    model.eval()
-    with open(model_path / 'model.pt', 'w') as f:
-        torch.save(model, f)
-    # test data
+    print(f'Device={device}')
+    print(f'Window size={window_size}')
+    if args.do_train:
+        print('Train')
+        model.train()
+        X = train_X.to(device)
+        Y = train_Y.to(device)
+        model.fit(X_train=X, Y_train=Y, epochs=5, progress_bar=1)
+        torch.save(model, model_checkpoint)
+    if args.do_eval:
+        print('Eval')
+        model.eval()
+        eval_source_index, eval_target_index, eval_X, eval_Y = load_data(test_docs)
+        X_eval = eval_X.to(device)
+        Y_eval = eval_Y.to(device)
+        loss, error_rate = model.evaluate(X_eval, Y_eval, progress_bar=True)
+        print(f'Loss={loss}\terror_rate={error_rate}')
+    # do_prediction
+    if args.do_prediction:
+        print('Prediction')
+        model.eval()
+        model.to('cpu')
+        test_data = list(
+            pool.imap_unordered(create_windows, tqdm(zip(test_docs, [window_size for i in test_docs])),
+                                chunksize=128))
+        test_data = [d for doc in test_data for d in doc]
+        # train data and model
+        test_source = [t[0] for t in test_data][0]
+        test_target = [t[1] for t in test_data][0]
+        test_source = "".join(test_source).replace(GAP, '')
+        test_source = list(test_source)
+        X_test = train_source_index.text2tensor(test_source)
+        # X_test = X_test.to(device)
+        # plain beam search
+        predictions, log_probabilities = seq2seq.beam_search(
+            model,
+            X_test,
+            progress_bar=0
+        )
+        just_beam = train_target_index.tensor2text(predictions[:, 0, :])[0]
+        just_beam = re.sub(r"<START>|<PAD>|<UNK>|<END>.*", "", just_beam)
 
-    test_data = list(
-        p.imap_unordered(create_windows, tqdm(zip(test_docs, [window_length for i in test_docs])), chunksize=128))
-    test_data = [d for doc in test_data for d in doc]
-    # train data and model
-    test_source = [t[0] for t in test_data][0:1]
-    X_test = source_index.text2tensor(test_source)
-    # plain beam search
-    predictions, log_probabilities = seq2seq.beam_search(
-        model,
-        X_test,
-        progress_bar=0
-    )
-    just_beam = target_index.tensor2text(predictions[:, 0, :])[0]
-    just_beam = re.sub(r"<START>|<PAD>|<UNK>|<END>.*", "", just_beam)
+        # post ocr correction
+        decoding_method = "beam_search"
+        weight_function = "uniform"
+        disjoint_beam = correction.disjoint(
+            test_source,
+            model,
+            train_source_index,
+            train_target_index,
+            window_size=window_size,
+            decoding_method=decoding_method,
+        )
+        _, n_grams_beam = correction.n_grams(
+            test_source,
+            model,
+            train_source_index,
+            train_target_index,
+            window_size=window_size,
+            decoding_method=decoding_method,
+            weighting=weight_function
+        )
 
-    # post ocr correction
-    disjoint_beam = correction.disjoint(
-        test_source,
-        model,
-        source_index,
-        target_index,
-        5,
-        "beam_search",
-    )
-    _, n_grams_beam = correction.n_grams(
-        test_source,
-        model,
-        source_index,
-        target_index,
-        5,
-        "beam_search",
-        "triangle"
-    )
-
-    print("\nresults")
-    print("  test data                      ", test_source)
-    print("  plain beam search              ", just_beam)
-    print("  disjoint windows, beam search  ", disjoint_beam)
-    print("  n-grams, beam search, triangle ", n_grams_beam)
+        print("\nresults")
+        print(f"  test data\t\t{''.join(test_source)}")
+        print(f"  test target\t\t{''.join(test_target)}")
+        print("  plain beam search              ", just_beam)
+        print("  disjoint windows, beam search  ", disjoint_beam)
+        print(f"  n-grams, {decoding_method}, {weight_function}:{n_grams_beam} ", )
+    pool.close()
+    pool.terminate()
