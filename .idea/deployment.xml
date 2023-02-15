@@ -5,7 +5,7 @@
       <paths name="std2020@121.48.161.220:65000">
         <serverdata>
           <mappings>
-            <mapping deploy="/home/std2020/xuqinkun/code/post_ocr_correction" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/code/post_ocr_correction" local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>
