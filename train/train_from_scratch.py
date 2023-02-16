@@ -96,8 +96,8 @@ def get_files(folder, dataset):
         test_dir = folder / 'test'
         train_align_document = train_dir / 'align'
         test_align_document = test_dir / 'align'
-        train_set = train_align_document.glob('*.txt')
-        dev_set = test_align_document.glob('*.txt')
+        train_set = [f for f in train_align_document.glob('*.txt')]
+        dev_set = [f for f in test_align_document.glob('*.txt')]
         return train_set, dev_set
     else:
         train_dir = folder / 'ICDAR2019_POCR_competition_training_18M_without_Finnish'
@@ -138,11 +138,13 @@ if __name__ == '__main__':
     data_folder = Path(args.input_path)
     model_path = Path(args.model_path)
     output_folder = Path(args.output_path)
-
+    epoch = args.epoch
     dataset = args.dataset
-    train_files, dev_files = get_files(data_folder, dataset)
-    model_checkpoint = model_path / f'model_{dataset}.pt'
     window_size = args.window_size
+
+    train_files, dev_files = get_files(data_folder, dataset)
+    model_checkpoint = model_path / f'model_{dataset}_{epoch}_{window_size}.pt'
+
     train_docs = list(pool.imap_unordered(extract, zip(train_files, [dataset for f in train_files])))
     dev_docs = list(pool.imap_unordered(extract, zip(dev_files, [dataset for i in dev_files])))
 
@@ -175,8 +177,9 @@ if __name__ == '__main__':
         model.train()
         X = train_X.to(device)
         Y = train_Y.to(device)
+
         model.fit(X_train=X, Y_train=Y,
-                  epochs=args.epoch,
+                  epochs=epoch,
                   batch_size=args.batch_size,
                   learning_rate=args.learning_rate,
                   progress_bar=args.progress_bar,
@@ -205,10 +208,13 @@ if __name__ == '__main__':
                                 chunksize=128))
         test_data = [d for doc in test_data for d in doc]
         # train data and model
-        test_source = [t[0] for t in test_data][0]
+        test_source = ["".join(t[0]) for t in test_data][0:1]
         test_target = [t[1] for t in test_data][0]
-        test_source = "".join(test_source).replace(GAP, '')
-        test_source = list(test_source)
+        if dataset == SROIE:
+            test_source = ["".join(t).replace(GAP, '') for t in test_source]
+        else:
+            test_source = "".join(test_source).replace('@', '')
+        test_source = [list(t) for t in test_source]
         X_test = train_source_index.text2tensor(test_source)
         # X_test = X_test.to(device)
         # plain beam search
@@ -224,7 +230,7 @@ if __name__ == '__main__':
         decoding_method = "beam_search"
         weight_function = "uniform"
         disjoint_beam = correction.disjoint(
-            test_source,
+            test_source[0],
             model,
             train_source_index,
             train_target_index,
@@ -232,7 +238,7 @@ if __name__ == '__main__':
             decoding_method=decoding_method,
         )
         _, n_grams_beam = correction.n_grams(
-            test_source,
+            test_source[0],
             model,
             train_source_index,
             train_target_index,
@@ -242,7 +248,7 @@ if __name__ == '__main__':
         )
 
         print("\nresults")
-        print(f"  test data\t\t{''.join(test_source)}")
+        print(f"  test data\t\t{''.join(test_source[0])}")
         print(f"  test target\t\t{''.join(test_target)}")
         print("  plain beam search              ", just_beam)
         print("  disjoint windows, beam search  ", disjoint_beam)
