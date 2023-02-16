@@ -7,7 +7,6 @@ from timeit import default_timer as t
 from tqdm import tqdm
 from pytorch_beam_search import seq2seq
 import torch
-from pytorch_decoding import seq2seq
 ######################
 # weighting functions
 ######################
@@ -36,7 +35,8 @@ def disjoint(
     window_size = 50,
     decoding_method = "greedy_search", 
     document_progress_bar = False, 
-    document_batch_progress_bar = 0, 
+    document_batch_progress_bar = 0,
+    device='cpu',
     *arcorrect
 ):
     model.eval()
@@ -45,6 +45,8 @@ def disjoint(
     windows = ["".join([source_index.vocabulary.lookup(c) for c in s])\
         .replace("<UNK>", " ") for s in windows]
     X = source_index.text2tensor(windows, progress_bar = False)
+    X = X.to(device)
+    model.to(device)
     if decoding_method == "greedy_search":
         predictions, probs = seq2seq.greedy_search(
             model,
@@ -77,6 +79,7 @@ def n_grams(
     document_progress_bar = False, 
     document_batch_progress_bar = 0,      
     main_batch_size = 1024,
+    device='cpu',
     *arcorrect
 ):
     model.eval()
@@ -87,7 +90,8 @@ def n_grams(
             for i in range(len(string) - window_size + 1)]
     windows = ["".join([source_index.vocabulary.lookup(c) for c in s])\
     .replace("<UNK>", " ") for s in windows]
-    X = source_index.text2tensor(windows, progress_bar = False)
+    X = source_index.text2tensor(windows, progress_bar = False).to(device)
+    model.to(device)
     if decoding_method == "greedy_search":
         predictions, probs = seq2seq.greedy_search(
             model,
@@ -132,7 +136,8 @@ def full_evaluation(
     source_index,
     target_index,
     save_path = None, 
-    window_size = 10, 
+    window_size = 10,
+    device='cpu',
     document_progress_bar = False
 ):
     print("evaluating all methods...")
@@ -149,7 +154,8 @@ def full_evaluation(
             source_index,
             target_index,
             document_progress_bar = document_progress_bar, 
-            window_size = window_size
+            window_size = window_size,
+            device=device,
         ) for s in raw]
     metrics.append(
         {
@@ -169,13 +175,14 @@ def full_evaluation(
     start = t()
     corrections = [
         disjoint(
-            s, 
-            model, 
+            s,
+            model,
             source_index,
             target_index,
-            document_progress_bar = document_progress_bar, 
-            window_size = window_size * 2
-        ) 
+            document_progress_bar = document_progress_bar,
+            window_size = window_size * 2,
+            device=device,
+        )
         for s in raw
     ]
     metrics.append(
@@ -203,7 +210,8 @@ def full_evaluation(
             target_index,
             decoding_method = "beam_search", 
             document_progress_bar = document_progress_bar, 
-            window_size = window_size
+            window_size = window_size,
+            device=device,
         ) 
         for s in raw
     ]
@@ -294,7 +302,8 @@ def full_evaluation(
             target_index,
             weighting = triangle, 
             document_progress_bar = document_progress_bar,
-            window_size = window_size
+            window_size = window_size,
+            device=device,
         )[1] 
         for s in raw
     ]
@@ -324,7 +333,8 @@ def full_evaluation(
             target_index,
             weighting = bell, 
             document_progress_bar = document_progress_bar,
-            window_size = window_size
+            window_size = window_size,
+            device=device,
         )[1] 
         for s in raw
     ]
@@ -357,7 +367,8 @@ def full_evaluation(
             decoding_method = "beam_search", 
             weighting = uniform, 
             document_progress_bar = document_progress_bar,
-            window_size = window_size
+            window_size = window_size,
+            device=device,
         )[1] 
         for s in raw
     ]
@@ -388,7 +399,8 @@ def full_evaluation(
             decoding_method = "beam_search", 
             weighting = triangle, 
             document_progress_bar = document_progress_bar,
-            window_size = window_size
+            window_size = window_size,
+            device=device,
         )[1] 
         for s in raw
     ]
@@ -419,7 +431,8 @@ def full_evaluation(
             decoding_method = "beam_search", 
             weighting = bell, 
             document_progress_bar = document_progress_bar,
-            window_size = window_size
+            window_size = window_size,
+            device=device,
         )[1] 
         for s in raw
     ]
