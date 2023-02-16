@@ -77,8 +77,7 @@ def load_data(save_dir, docs, dataset, overwrite=False):
         source = ["".join(t[0]).replace(GAP, '') for t in train_data]
     else:
         source = ["".join(t[0]).replace('@', '') for t in train_data]
-    source = [list(t) for t in source]
-    target = [list(t[1]) for t in train_data]
+    target = ["".join(t[1]) for t in train_data]
     source_index = seq2seq.Index(source)
     target_index = seq2seq.Index(target)
     X = source_index.text2tensor(source, progress_bar=True)
@@ -172,6 +171,7 @@ if __name__ == '__main__':
     print(f'Device={device}')
     print(f'Window size={window_size}')
     # Train
+    batch_size = args.batch_size
     if args.do_train and args.overwrite_model:
         print(f'Train on {dataset}')
         model.train()
@@ -180,7 +180,7 @@ if __name__ == '__main__':
 
         model.fit(X_train=X, Y_train=Y,
                   epochs=epoch,
-                  batch_size=args.batch_size,
+                  batch_size=batch_size,
                   learning_rate=args.learning_rate,
                   progress_bar=args.progress_bar,
                   weight_decay=args.weight_decay,
@@ -206,52 +206,68 @@ if __name__ == '__main__':
         test_data = list(
             pool.imap_unordered(create_windows, tqdm(zip(dev_docs, [(window_size, dataset) for i in dev_docs])),
                                 chunksize=128))
-        test_data = [d for doc in test_data for d in doc]
-        # train data and model
-        test_source = ["".join(t[0]) for t in test_data][0:1]
-        test_target = [t[1] for t in test_data][0]
-        if dataset == SROIE:
-            test_source = ["".join(t).replace(GAP, '') for t in test_source]
-        else:
-            test_source = "".join(test_source).replace('@', '')
-        test_source = [list(t) for t in test_source]
-        X_test = train_source_index.text2tensor(test_source)
-        # X_test = X_test.to(device)
-        # plain beam search
-        predictions, log_probabilities = seq2seq.beam_search(
-            model,
-            X_test,
-            progress_bar=0
-        )
-        just_beam = train_target_index.tensor2text(predictions[:, 0, :])[0]
-        just_beam = re.sub(r"<START>|<PAD>|<UNK>|<END>.*", "", just_beam)
-
-        # post ocr correction
-        decoding_method = "beam_search"
-        weight_function = "uniform"
-        disjoint_beam = correction.disjoint(
-            test_source[0],
-            model,
-            train_source_index,
-            train_target_index,
-            window_size=window_size,
-            decoding_method=decoding_method,
-        )
-        _, n_grams_beam = correction.n_grams(
-            test_source[0],
-            model,
-            train_source_index,
-            train_target_index,
-            window_size=window_size,
-            decoding_method=decoding_method,
-            weighting=weight_function
-        )
-
-        print("\nresults")
-        print(f"  test data\t\t{''.join(test_source[0])}")
-        print(f"  test target\t\t{''.join(test_target)}")
-        print("  plain beam search              ", just_beam)
-        print("  disjoint windows, beam search  ", disjoint_beam)
-        print(f"  n-grams, {decoding_method}, {weight_function}:{n_grams_beam} ", )
+        for doc in test_data:
+            lines = [d for d in doc]
+            source = [line[0] for line in lines]
+            target = [line[1] for line in lines]
+            # train data and model
+            if dataset == SROIE:
+                ocr_input = [t.replace(GAP, '') for t in source]
+            else:
+                ocr_input = [t.replace('@', '') for t in source]
+            full_text = "".join([s[0] for s in ocr_input if s != ''])
+            gs_align = "".join([t[0] for t in target])
+            X_test = train_source_index.text2tensor(ocr_input[0:1], progress_bar=True)
+            X_test = X_test.to(device)
+            model.to(device)
+            # plain beam search
+            metrics = correction.full_evaluation(
+                raw=[full_text],
+                gs=[gs_align],
+                model=model,
+                source_index=train_source_index,
+                target_index=train_target_index,
+                device=device,
+            )
+            print(metrics)
+            # predictions, log_probabilities = seq2seq.beam_search(
+            #     model,
+            #     X_test,
+            #     progress_bar=1,
+            #     batch_size=batch_size,
+            # )
+            # just_beam = train_target_index.tensor2text(predictions[:, 0, :])
+            # just_beam = re.sub(r"<START>|<PAD>|<UNK>|<END>.*", "", just_beam)
+            #
+            # # post ocr correction
+            # decoding_method = "beam_search"
+            # weight_function = "uniform"
+            # disjoint_beam = correction.disjoint(
+            #     ocr_input,
+            #     model,
+            #     train_source_index,
+            #     train_target_index,
+            #     window_size=window_size,
+            #     decoding_method=decoding_method,
+            #     document_batch_progress_bar=1,
+            #     device=device,
+            # )
+            # _, n_grams_beam = correction.n_grams(
+            #     ocr_input,
+            #     model,
+            #     train_source_index,
+            #     train_target_index,
+            #     window_size=window_size,
+            #     decoding_method=decoding_method,
+            #     weighting=weight_function,
+            #     document_batch_progress_bar=1,
+            #     device=device,
+            # )
+            # print("\n+++++++++Results+++++++++")
+            # print(f"OCR input:\t\t{''.join([t[0] for t in ocr_input])}")
+            # print(f"GS align\t\t{gs_align}")
+            # print(f"Plain beam search {just_beam}")
+            # print(f"Disjoint windows, beam search  ", disjoint_beam)
+            # print(f"n-grams, {decoding_method}, {weight_function}:{n_grams_beam} ", )
     pool.close()
     pool.terminate()
