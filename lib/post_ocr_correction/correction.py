@@ -35,7 +35,7 @@ def disjoint(
     window_size = 50,
     decoding_method = "greedy_search", 
     document_progress_bar = False, 
-    document_batch_progress_bar = 0,
+    document_batch_progress_bar = 1,
     device='cpu',
     *arcorrect
 ):
@@ -77,7 +77,7 @@ def n_grams(
     decoding_method = "greedy_search", 
     weighting = "uniform",
     document_progress_bar = False, 
-    document_batch_progress_bar = 0,      
+    document_batch_progress_bar = 1,
     main_batch_size = 1024,
     device='cpu',
     *arcorrect

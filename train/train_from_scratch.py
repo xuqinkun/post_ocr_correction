@@ -118,6 +118,7 @@ if __name__ == '__main__':
     parser.add_argument('-w', '--window_size', type=int, default=20)
     parser.add_argument('-e', '--epoch', type=int, default=5)
     parser.add_argument('-bs', '--batch_size', type=int, default=32)
+    parser.add_argument('-es', '--eval_size', type=int, default=50)
     parser.add_argument('-lr', '--learning_rate', type=float, default=0.0001)
     parser.add_argument('-do', '--dropout', type=float, default=0.5)
     parser.add_argument('-wd', '--weight_decay', type=float, default=0.0001)
@@ -137,6 +138,8 @@ if __name__ == '__main__':
     data_folder = Path(args.input_path)
     model_path = Path(args.model_path)
     output_folder = Path(args.output_path)
+    if not output_folder.exists():
+        output_folder.mkdir(parents=True)
     epoch = args.epoch
     dataset = args.dataset
     window_size = args.window_size
@@ -205,69 +208,40 @@ if __name__ == '__main__':
         model.to('cpu')
         test_data = list(
             pool.imap_unordered(create_windows, tqdm(zip(dev_docs, [(window_size, dataset) for i in dev_docs])),
-                                chunksize=128))
-        for doc in test_data:
+                          chunksize=128))
+        ocr_inputs = []
+        gs_docs = []
+        if args.eval_size != 0:
+            eval_set = random.choices(test_data, k=args.eval_size)
+        else:
+            eval_set = test_data
+        print(f'Full evaluation on {len(eval_set)} docs')
+        for doc in eval_set:
             lines = [d for d in doc]
             source = [line[0] for line in lines]
             target = [line[1] for line in lines]
             # train data and model
             if dataset == SROIE:
+                source = ["".join(s) for s in source]
                 ocr_input = [t.replace(GAP, '') for t in source]
             else:
                 ocr_input = [t.replace('@', '') for t in source]
             full_text = "".join([s[0] for s in ocr_input if s != ''])
-            gs_align = "".join([t[0] for t in target])
-            X_test = train_source_index.text2tensor(ocr_input[0:1], progress_bar=True)
-            X_test = X_test.to(device)
-            model.to(device)
+            gs_align = "".join([t[0] for t in target if len(t) > 0])
+            ocr_inputs.append(full_text)
+            gs_docs.append(gs_align)
             # plain beam search
-            metrics = correction.full_evaluation(
-                raw=[full_text],
-                gs=[gs_align],
-                model=model,
-                source_index=train_source_index,
-                target_index=train_target_index,
-                device=device,
-            )
-            print(metrics)
-            # predictions, log_probabilities = seq2seq.beam_search(
-            #     model,
-            #     X_test,
-            #     progress_bar=1,
-            #     batch_size=batch_size,
-            # )
-            # just_beam = train_target_index.tensor2text(predictions[:, 0, :])
-            # just_beam = re.sub(r"<START>|<PAD>|<UNK>|<END>.*", "", just_beam)
-            #
-            # # post ocr correction
-            # decoding_method = "beam_search"
-            # weight_function = "uniform"
-            # disjoint_beam = correction.disjoint(
-            #     ocr_input,
-            #     model,
-            #     train_source_index,
-            #     train_target_index,
-            #     window_size=window_size,
-            #     decoding_method=decoding_method,
-            #     document_batch_progress_bar=1,
-            #     device=device,
-            # )
-            # _, n_grams_beam = correction.n_grams(
-            #     ocr_input,
-            #     model,
-            #     train_source_index,
-            #     train_target_index,
-            #     window_size=window_size,
-            #     decoding_method=decoding_method,
-            #     weighting=weight_function,
-            #     document_batch_progress_bar=1,
-            #     device=device,
-            # )
-            # print("\n+++++++++Results+++++++++")
-            # print(f"OCR input:\t\t{''.join([t[0] for t in ocr_input])}")
-            # print(f"GS align\t\t{gs_align}")
-            # print(f"Plain beam search {just_beam}")
-            # print(f"Disjoint windows, beam search  ", disjoint_beam)
-            # print(f"n-grams, {decoding_method}, {weight_function}:{n_grams_beam} ", )
+        model.to(device)
+        metrics = correction.full_evaluation(
+            raw=ocr_inputs,
+            gs=gs_docs,
+            model=model,
+            window_size=int(window_size/2),
+            source_index=train_source_index,
+            target_index=train_target_index,
+            device=device,
+            save_path=output_folder/f'{dataset}_metrics.csv',
+        )
+        print(metrics)
     pool.close()
     pool.terminate()
